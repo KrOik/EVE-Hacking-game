@@ -1,51 +1,48 @@
+"""
+This module serves as the main entry point for the EVE Hacking game.
+
+It handles the initialization of the curses environment and delegates the game loop
+execution to the GameEngine. This separation of concerns ensures that the entry point
+remains lightweight and focused on environment setup.
+
+Architecture Role:
+    - Entry Point: Bootstraps the application.
+    - Environment Setup: Uses curses.wrapper to safely initialize/teardown the terminal.
+
+Modification History:
+    - 2025-11-28: Refactored to be a simple entry point.
+"""
+
 import curses
-from data import System
-from render import SystemRenderer
-
-
-screen = curses.initscr()
-screen.clear()
-
-
-def get_node_at_mouse(board: System, my, mx):
-    if my % 3 != 0:
-        return None
-    row = my // 3
-    if row % 2 == 0:
-        col = mx // 3
-        if col % 2 == 0:
-            col = col // 2
-            return board.node_at(row, col)
-    else:
-        mx -= 3
-        col = mx // 3
-        if col % 2 == 0:
-            col = col // 2
-            return board.node_at(row, col)
-    return None
-
+from game.engine import GameEngine
 
 def main(screen):
-    board = System()
-    renderer = SystemRenderer()
-    curses.noecho()
-    curses.cbreak()
-    curses.curs_set(0)
-    curses.resize_term(128, 128)
-    curses.start_color()
-    screen.keypad(True)
-    curses.mousemask(True)
+    """
+    The main function that initializes and runs the game.
 
-    while True:
-        renderer.render(board, screen)
-        ch = screen.getch()
-        if ch == curses.KEY_MOUSE:
-            _, mx, my, _, _ = curses.getmouse()
-            node = get_node_at_mouse(board, my, mx)
-            if board.can_visit_node(node):
-                board.visit_node(node)
-        if ch == curses.KEY_ENTER:
-            board = System()
+    This function is called by curses.wrapper() and serves as the bridge between
+    the curses environment and the game engine.
 
+    Args:
+        screen (curses.window): The main curses screen object provided by curses.wrapper.
+                                This object represents the terminal window.
 
-curses.wrapper(main)
+    Returns:
+        None
+
+    Raises:
+        Exception: Propagates any unhandled exceptions from the game engine, ensuring
+                   curses is torn down correctly before crashing.
+    """
+    # Initialize the GameEngine with the prepared curses screen
+    engine = GameEngine(screen)
+    
+    # Start the main game loop
+    engine.run()
+
+if __name__ == '__main__':
+    # The curses.wrapper function is a safe way to run a curses application.
+    # It handles the initialization and teardown of the curses environment,
+    # ensuring that the terminal is restored to its normal state even if the program crashes.
+    # This prevents the terminal from being left in an unusable state.
+    curses.wrapper(main)
