@@ -1,4 +1,4 @@
-# EVE Hacking Terminal Game / EVE 黑客终端游戏
+# EVE Hacking Terminal Game / EVE 破译游戏
 
 [English](#english) | [中文](#chinese)
 
@@ -48,7 +48,7 @@ python main.py
 ## 中文 (Chinese)
 
 ### 简介
-本项目是 MMORPG **EVE Online** 中黑客小游戏的终端复刻版。它高度还原了探索六边形网格、管理病毒一致性（Coherence）以及与防御子系统战斗以攻破系统核心（System Core）的游戏机制。
+本项目是 MMORPG **EVE Online** 中破译小游戏的终端复刻版。它高度还原了探索六边形网格、管理病毒一致性（Coherence）以及与防御子系统战斗以攻破系统核心（System Core）的游戏机制。
 
 ### 特性
 - **程序化地图生成**: 使用雪花算法（Snowflake ID）作为种子，每次游戏都会生成独一无二的地图。
@@ -84,6 +84,8 @@ python main.py
 - **鼠标**: 点击节点进行移动或交互。点击工具栏图标使用道具。
 - **回车 (Enter)**: 游戏结束（Game Over）后重启游戏。
 
-THANKS: https://github.com/cmbasnett/eve-hack
-THANKS: https://wiki.eveuniversity.org/Hacking
-THANKS: https://eve.huijiwiki.com/wiki/%E7%A0%B4%E8%AF%91
+-THANKS: https://github.com/cmbasnett/eve-hack
+
+-THANKS: https://wiki.eveuniversity.org/Hacking
+
+-THANKS: https://eve.huijiwiki.com/wiki/%E7%A0%B4%E8%AF%91
