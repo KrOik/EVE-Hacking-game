@@ -15,6 +15,8 @@ Modification History:
 
 import curses
 from game.engine import GameEngine
+from game.logger import setup_logging
+import logging
 
 def main(screen):
     """
@@ -34,11 +36,22 @@ def main(screen):
         Exception: Propagates any unhandled exceptions from the game engine, ensuring
                    curses is torn down correctly before crashing.
     """
+    # Initialize logging
+    setup_logging()
+    logger = logging.getLogger(__name__)
+    logger.info("Starting EVE Hacking Game...")
+
     # Initialize the GameEngine with the prepared curses screen
-    engine = GameEngine(screen)
-    
-    # Start the main game loop
-    engine.run()
+    try:
+        engine = GameEngine(screen)
+        
+        # Start the main game loop
+        engine.run()
+    except Exception as e:
+        logger.exception("An unhandled exception occurred during game execution:")
+        raise e
+    finally:
+        logger.info("Game shutting down.")
 
 if __name__ == '__main__':
     # The curses.wrapper function is a safe way to run a curses application.

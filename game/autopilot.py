@@ -56,6 +56,52 @@ class Config:
     NUKE_HP_THRESHOLD = 60           # Use nuke on threats with HP > this
     NUKE_CORE_PRIORITY = True        # Always try to nuke Core
 
+    @classmethod
+    def update(cls, params: Dict[str, Union[float, int]]):
+        """
+        Dynamically updates configuration parameters.
+        
+        Args:
+            params (dict): Dictionary of parameter names and values.
+                           Can include keys from WEIGHTS or class attributes.
+        """
+        for key, value in params.items():
+            if key in cls.WEIGHTS:
+                cls.WEIGHTS[key] = float(value)
+            elif hasattr(cls, key):
+                # Update class attribute if it exists
+                current_type = type(getattr(cls, key))
+                setattr(cls, key, current_type(value))
+
+    @classmethod
+    def try_load_optimized_params(cls):
+        """Attempts to load optimized parameters from best_autopilot_params.json."""
+        import json
+        import os
+        
+        # Potential locations for the params file
+        # 1. Current working directory
+        # 2. Project root (assuming this file is in game/)
+        possible_paths = [
+            'best_autopilot_params.json',
+            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'best_autopilot_params.json')
+        ]
+        
+        for path in possible_paths:
+            if os.path.exists(path):
+                try:
+                    with open(path, 'r') as f:
+                        params = json.load(f)
+                    cls.update(params)
+                    return True
+                except Exception:
+                    continue
+        return False
+
+# Attempt to load params on module import
+Config.try_load_optimized_params()
+
+
 
 class AutoPilot:
     def __init__(self, system: System):
@@ -140,7 +186,12 @@ class AutoPilot:
         }
         
         for node in frontier:
-            if node.token:
+            # Anti-Cheating: Only categorize as specific types if the node has been visited (revealed).
+            # In EVE Hacking, exposed nodes [ ] are unknown until clicked/visited.
+            # Exception: Debug mode allows peeking.
+            is_revealed = node.is_visited or self.system.debug_mode
+
+            if is_revealed and node.token:
                 if isinstance(node.token, Core):
                     targets['core'].append(node)
                 elif isinstance(node.token, (Firewall, AntiVirus, RestoNode, Suppressor)):
@@ -151,6 +202,7 @@ class AutoPilot:
                     # Fallback for unknown tokens
                     targets['threat'].append(node)
             else:
+                # Treat unvisited exposed nodes as unknown, forcing the AI to 'explore' (click) them first.
                 targets['unknown'].append(node)
         return targets
 

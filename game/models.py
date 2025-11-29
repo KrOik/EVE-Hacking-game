@@ -19,6 +19,7 @@ import curses
 from collections import deque
 import time
 import os
+from game.map_generator import MapGenerator
 
 # --- Direction Constants ---
 # These bitmasks represent the six possible directions in a hexagonal grid.
@@ -176,17 +177,19 @@ class System(object):
         core (Core): The main objective.
         selected_node (Node): The currently highlighted/selected node.
     """
-    def __init__(self, seed=None):
+    def __init__(self, seed=None, debug_mode=False):
         """
         Initializes the System and generates a new game map.
 
         Args:
             seed (int, optional): Seed for RNG to create deterministic maps. 
                                   If None, a new Snowflake ID is used.
+            debug_mode (bool): If True, all nodes are revealed (exposed) initially.
         """
         if seed is None:
             id_generator = SnowflakeIDGenerator()
             seed = id_generator.generate_id()
+        self.debug_mode = debug_mode
         self.width = 14 # Fixed grid width
         self.height = 8 # Fixed grid height
         self.nodes = []
@@ -199,6 +202,13 @@ class System(object):
 
         # Start the procedural generation process
         self.create_nodes(seed)
+
+        # Debug Mode: Reveal all nodes
+        if debug_mode:
+            for row in self.nodes:
+                for node in row:
+                    if node:
+                        node.is_exposed = True
 
     def bfs_iterator(self, node):
         """
@@ -242,375 +252,12 @@ class System(object):
 
     def create_nodes(self, seed):
         """
-        Procedurally generates the game map.
-
-        The generation algorithm follows these steps:
-        1. Initialize a full grid of nodes.
-        2. Select a starting node (usually on the edge).
-        3. Select a 'waypoint' and 'core' location to ensure path complexity.
-        4. 'Lock' the path from Start -> Waypoint -> Core to prevent deletion.
-        5. Randomly remove ~25% of non-locked nodes to create holes/mazes.
-        6. Prune any disjoint islands.
-        7. Populate the map with Tokens (Firewalls, Utilities, etc.).
+        Procedurally generates the game map using MapGenerator.
 
         Args:
             seed (int): Random seed for generation.
         """
-        if seed is not None:
-            random.seed(seed)
-
-        # 1. Initialize Grid
-        for row_index in range(self.height):
-            row = [None] * self.width
-            self.nodes.append(row)
-            for column_index in range(self.width):
-                self.nodes[row_index][column_index] = Node(row_index, column_index)
-
-        # 2. Select Start Node
-        starting_node = self.get_starting_node()
-        self.visit_node(starting_node, force=True)
-
-        # 3. Determine Key Locations (Waypoint & Core)
-        node_at_jumps = self.get_nodes_at_jumps(starting_node, 5)
-        waypoint = random.choice(node_at_jumps)
-
-        # Improved Core Selection Logic: Maximize distance from start AND maximize "corner-ness"
-        best_candidates = []
-        best_score = -1.0
-        
-        center_row = (self.height - 1) / 2.0
-        center_col = (self.width - 1) / 2.0
-        
-        # Find max possible distance on grid roughly (approx 20) to normalize if needed,
-        # but raw score comparison is fine.
-        
-        for row in range(self.height):
-            for col in range(self.width):
-                node = self.nodes[row][col]
-                sp = self.get_path(starting_node, node)
-                
-                if sp is None:
-                    continue
-                    
-                dist = len(sp)
-                if dist < 8: # Hard constraint: Must be at least 8 steps away
-                    continue
-                
-                # Calculate distance from center (Squared Euclidean is efficient and works)
-                # Corners have max distance from center.
-                dist_from_center_sq = (row - center_row)**2 + (col - center_col)**2
-                
-                # Score Formula:
-                # We want to prioritize:
-                # 1. Distance from Start (High weight)
-                # 2. Proximity to Corners (Medium weight)
-                #
-                # dist ranges approx 8 to 20.
-                # dist_from_center_sq ranges 0 to approx 60.
-                #
-                # Let's combine them: Score = (PathDist * 4.0) + DistFromCenterSq
-                score = (dist * 4.0) + dist_from_center_sq
-                
-                if score > best_score:
-                    best_score = score
-                    best_candidates = [node]
-                elif abs(score - best_score) < 0.1:
-                    best_candidates.append(node)
-
-        if not best_candidates:
-            # Fallback if no valid candidates found (should be rare on empty grid)
-            # Just pick any node far enough
-             for row in range(self.height):
-                for col in range(self.width):
-                     node = self.nodes[row][col]
-                     sp = self.get_path(starting_node, node)
-                     if sp and len(sp) >= 8:
-                         best_candidates.append(node)
-        
-        if best_candidates:
-            core_node = random.choice(best_candidates)
-        else:
-             # Extreme fallback
-             core_node = self.nodes[self.height-1][self.width-1] if starting_node.row == 0 else self.nodes[0][0]
-
-        self.core = Core(self)
-        core_node.token = self.core
-
-        # 4. Lock Essential Path
-        p = self.get_path(starting_node, waypoint)
-        q = self.get_path(waypoint, self.core.node)
-        locked_nodes = set(p + q)
-        locked_nodes.add(starting_node)
-
-        # 5. Random Deletion (The "Swiss Cheese" method)
-        # Revised Rule:
-        # 1. Max 4 holes total.
-        # 2. Holes must be small (max 1x2, i.e., no more than 2 adjacent deleted nodes).
-        # 3. Prevent bottlenecks (no node should have >2 neighbors removed if it relies on them for connectivity).
-        
-        population = []
-        for row in range(self.height):
-            for col in range(self.width):
-                node = self.nodes[row][col]
-                if node in locked_nodes:
-                    continue
-                population.append(node)
-
-        nodes_to_delete = []
-        max_holes = 4
-        
-        # Try to create up to max_holes clusters
-        for _ in range(max_holes):
-            if not population:
-                break
-            
-            # Pick a seed for the hole
-            seed_node = random.choice(population)
-            
-            # Connectivity Check (Bottleneck Prevention)
-            safe_to_delete = True
-            neighbors = self.get_neighbors(seed_node)
-            for n in neighbors:
-                # If a neighbor has 2 or fewer neighbors, deleting this node might isolate it
-                # or create a dead end/bottleneck.
-                if n and self.get_num_neighbors(n) <= 2:
-                     safe_to_delete = False
-                     break
-            
-            if not safe_to_delete:
-                continue
-
-            # Cluster size: 1 or 2 nodes
-            cluster_size = random.randint(1, 2)
-            current_hole = [seed_node]
-            
-            if cluster_size > 1:
-                # Try to expand hole to a neighbor
-                valid_neighbors = [n for n in neighbors if n in population and n != seed_node]
-                if valid_neighbors:
-                    # Check safety for the second node too
-                    second_node = random.choice(valid_neighbors)
-                    
-                    safe_second = True
-                    sec_neighbors = self.get_neighbors(second_node)
-                    for sn in sec_neighbors:
-                        # We exclude the seed_node from this check since we are deleting it anyway
-                        if sn and sn != seed_node and self.get_num_neighbors(sn) <= 2:
-                            safe_second = False
-                            break
-                    
-                    if safe_second:
-                        current_hole.append(second_node)
-            
-            # Commit deletion
-            for node in current_hole:
-                if node in population:
-                    population.remove(node)
-                    nodes_to_delete.append(node)
-        
-        for node in nodes_to_delete:
-            self.nodes[node.row][node.column] = None
-
-        # 6. Cleanup
-        self.prune_disjoint(starting_node)
-
-        # 7. Place Tokens
-        # Get valid empty nodes
-        population = list(filter(lambda n: n is not None and n.token is None, [node for row in self.nodes for node in row]))
-        if starting_node in population:
-            population.remove(starting_node)
-            
-        # Helper to find path distance (reusing BFS)
-        def get_dist(start, end):
-             p = self.get_path(start, end)
-             return len(p) if p else 999
-
-        # Calculate distances for heuristics
-        # Optimization: Pre-calculate distances from Start and Core for all nodes in population
-        # BFS from Core
-        dist_from_core = {}
-        queue = deque([BfsNode(self.core.node, None, 0)])
-        visited = {self.core.node}
-        while queue:
-            curr = queue.pop()
-            dist_from_core[curr.node] = curr.depth
-            for n in self.get_neighbors(curr.node):
-                if n and n not in visited:
-                    visited.add(n)
-                    queue.insert(0, BfsNode(n, curr, curr.depth + 1))
-        
-        # BFS from Start
-        dist_from_start = {}
-        queue = deque([BfsNode(starting_node, None, 0)])
-        visited = {starting_node}
-        while queue:
-            curr = queue.pop()
-            dist_from_start[curr.node] = curr.depth
-            for n in self.get_neighbors(curr.node):
-                if n and n not in visited:
-                    visited.add(n)
-                    queue.insert(0, BfsNode(n, curr, curr.depth + 1))
-                    
-        # Identify Main Path nodes (heuristic: nodes on shortest path)
-        # We can reuse the 'locked_nodes' concept or just check if dist_start + dist_core ~ total_dist
-        # But simple heuristics work best.
-        
-        # Total distance from Start to Core
-        total_dist_start_core = dist_from_start.get(self.core.node, 20)
-
-        def pick_best_node(token_cls, candidates):
-            if not candidates:
-                return None
-            
-            scored_candidates = []
-            for node in candidates:
-                score = random.random() * 10.0 # Base random score
-                
-                d_core = dist_from_core.get(node, 99)
-                d_start = dist_from_start.get(node, 99)
-                neighbors = self.get_num_neighbors(node)
-                
-                if token_cls == RestoNode:
-                    # Priority: Near Firewall or AntiVirus
-                    # New Requirement: Refresh near AntiVirus and Firewall.
-                    
-                    # Find existing Firewalls and AntiVirus
-                    # Note: This requires Firewalls and AVs to be placed BEFORE RestoNodes.
-                    # We will update the spawn order below.
-                    min_dist_to_friend = 99
-                    for r in range(self.height):
-                        for c in range(self.width):
-                            n = self.nodes[r][c]
-                            if n and n.token and (isinstance(n.token, Firewall) or isinstance(n.token, AntiVirus)):
-                                p = self.get_path(node, n)
-                                d = len(p) if p else 99
-                                if d < min_dist_to_friend:
-                                    min_dist_to_friend = d
-                    
-                    if min_dist_to_friend <= 1:
-                         score += 50
-                    elif min_dist_to_friend <= 2:
-                         score += 30
-                    
-                elif token_cls == Suppressor:
-                    # Priority: Mid-Front (Early-Mid Game), Non-Critical Intersections
-                    # "Mid-Front": 20% to 50% of the way.
-                    # "Non-Critical": Not a choke point (neighbors >= 3) and Not on critical path.
-                    
-                    dist_ratio = d_start / max(total_dist_start_core, 1)
-                    
-                    if 0.2 <= dist_ratio <= 0.5:
-                        score += 40
-                    elif 0.1 <= dist_ratio <= 0.6:
-                        score += 10
-                        
-                    # Prefer Open Areas / Non-Choke Points
-                    if neighbors >= 3:
-                        score += 20
-                    if neighbors >= 4:
-                        score += 10
-                        
-                    # Prefer Off-Path (Non-Critical)
-                    path_deviation = (d_start + d_core) - total_dist_start_core
-                    if path_deviation >= 2:
-                        score += 20
-                    
-                elif token_cls == Firewall:
-                    # Priority: Block Intersections / Choke Points
-                    # Definition of "Blocking": Nodes with few neighbors (bottlenecks) 
-                    # OR nodes on the critical path.
-                    
-                    # Bottleneck factor
-                    if neighbors <= 2: 
-                        score += 40
-                    elif neighbors <= 3: 
-                        score += 20
-                        
-                    # On Critical Path factor (blocking the way)
-                    # If d_start + d_core is close to total_dist, it's on a shortest path.
-                    path_deviation = (d_start + d_core) - total_dist_start_core
-                    if path_deviation <= 2:
-                        score += 15
-                    
-                elif token_cls == AntiVirus:
-                    # Priority: On Critical Path
-                    # Logic: Nodes where dist_start + dist_core is minimal (shortest path)
-                    path_deviation = (d_start + d_core) - total_dist_start_core
-                    if path_deviation == 0:
-                        score += 50 # Dead on the shortest path
-                    elif path_deviation <= 2:
-                        score += 30 # Slightly off path
-                    elif path_deviation <= 4:
-                        score += 10
-                    
-                scored_candidates.append((score, node))
-            
-            # Pick one of the top 3 to keep some randomness
-            scored_candidates.sort(key=lambda x: x[0], reverse=True)
-            top_n = min(len(scored_candidates), 3)
-            return random.choice(scored_candidates[:top_n])[1]
-
-        # Define Token Composition
-        # We want roughly 10 defensive tokens total.
-        # REORDERED: Place Firewall/AV first so RestoNode can find them.
-        tokens_to_spawn = [
-            Firewall, Firewall, Firewall,   # 3 Firewalls (Blockers)
-            AntiVirus, AntiVirus, AntiVirus,# 3 AntiVirus (Roamers/Random)
-            Suppressor, Suppressor,         # 2 Suppressors (Mid-Front)
-            RestoNode, RestoNode            # 2 RestoNodes (Support FW/AV)
-        ]
-        
-        for token_cls in tokens_to_spawn:
-            if not population:
-                break
-            
-            target = pick_best_node(token_cls, population)
-            if target:
-                target.token = token_cls(self)
-                population.remove(target)
-
-        # Place Utilities (Player powerups)
-        # Constraint: 2 to 4 utilities.
-        # Strategy: Maximize distance between utilities (Scattered).
-        utility_types = [SelfRepair, KernelRot, PolymorphicShield, SecondaryVector]
-        num_utilities = random.randint(2, 4)
-        placed_utility_nodes = []
-        
-        for _ in range(num_utilities):
-            if not population: break
-            
-            # We want to pick a node that is far from existing utilities.
-            # Algorithm: Maximize the Minimum Distance to existing utilities.
-            
-            candidates = random.sample(population, min(len(population), 15))
-            best_candidate = None
-            best_score = -1
-            
-            for node in candidates:
-                if not placed_utility_nodes:
-                    # First utility: Random is fine, or maybe prefer not too close to start?
-                    # Let's just give it a random high score to pick one.
-                    min_dist = random.randint(5, 15)
-                else:
-                    min_dist = 999
-                    for existing in placed_utility_nodes:
-                        path = self.get_path(node, existing)
-                        d = len(path) if path else 999
-                        if d < min_dist:
-                            min_dist = d
-                
-                # Score is the minimum distance to any other utility (plus noise)
-                score = min_dist + random.random()
-                
-                if score > best_score:
-                    best_score = score
-                    best_candidate = node
-            
-            if best_candidate:
-                utility_class = random.choice(utility_types)
-                best_candidate.token = utility_class(self)
-                population.remove(best_candidate)
-                placed_utility_nodes.append(best_candidate)
+        MapGenerator(self).generate(seed)
 
     def remove_node(self, node):
         """Removes a node from the grid and updates neighbor counts."""
@@ -1007,6 +654,27 @@ class Core(Token):
 
     def on_destroyed(self):
         pass
+
+
+class DataCache(Token):
+    """
+    A storage node that reveals its contents when accessed.
+    Contains either a Utility or a Defensive Subsystem.
+    """
+    def __init__(self, system, inner_token):
+        super().__init__(system)
+        self.inner_token = inner_token
+        self.icon = '📦'
+        self.coherence = 1
+        self.strength = 0
+
+    def on_attacked(self, attacker):
+        """Reveals the hidden token when attacked/interacted with."""
+        # Swap immediately
+        if self.node:
+            node = self.node
+            node.token = self.inner_token
+            self.inner_token.on_exposed()
 
 
 class Firewall(Token):

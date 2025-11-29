@@ -65,10 +65,10 @@ class SystemRenderer(object):
         if node.is_blocked:
             # 'x' indicates that the node is blocked.
             return f' x '
-        elif node.is_visited and isinstance(node.token, Core):
+        elif (node.is_visited or system.debug_mode) and isinstance(node.token, Core):
             # A computer icon represents a visited core node.
             return f'🖥️'
-        elif node.is_visited and node.token and node.token.icon:
+        elif (node.is_visited or system.debug_mode) and node.token and node.token.icon:
             return f'{node.token.icon} '
         elif system.selected_node == node:
             # If the node is selected, show the distance to the nearest meaningful node.

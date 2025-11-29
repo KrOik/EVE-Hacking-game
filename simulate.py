@@ -12,10 +12,10 @@ from game.models import System
 from game.autopilot import AutoPilot, Config
 from game.rendering import SystemRenderer
 
-def run_single_game(weights=None):
+def run_single_game(params=None):
     """Runs a single game silently and returns stats."""
-    if weights:
-        Config.WEIGHTS.update(weights)
+    if params:
+        Config.update(params)
         
     system = System()
     pilot = AutoPilot(system)
@@ -38,10 +38,10 @@ def run_single_game(weights=None):
         'health': system.virus.coherence
     }
 
-def run_visual_game(stdscr, weights=None, delay=0.3):
+def run_visual_game(stdscr, params=None, delay=0.3, debug_mode=False):
     """Runs a single game with visualization."""
-    if weights:
-        Config.WEIGHTS.update(weights)
+    if params:
+        Config.update(params)
     
     # Setup curses similar to GameEngine
     curses.curs_set(0)
@@ -54,7 +54,7 @@ def run_visual_game(stdscr, weights=None, delay=0.3):
     # Let's require at least 30 lines to be safe, or warn.
     
     # Initialize game
-    system = System()
+    system = System(debug_mode=debug_mode)
     pilot = AutoPilot(system)
     renderer = SystemRenderer()
     
@@ -113,12 +113,12 @@ def run_visual_game(stdscr, weights=None, delay=0.3):
     except curses.error:
         pass
 
-def run_batch_simulation(num_games=100, weights=None):
+def run_batch_simulation(num_games=100, params=None):
     """Runs a batch of games and prints statistics using multiprocessing."""
     cpu_count = multiprocessing.cpu_count()
     print(f"Running simulation for {num_games} games using {cpu_count} processes...")
-    if weights:
-        print(f"Custom Weights: {weights}")
+    if params:
+        print(f"Custom Params: {params}")
         
     start_time = time.time()
     wins = 0
@@ -133,7 +133,7 @@ def run_batch_simulation(num_games=100, weights=None):
         
         with multiprocessing.Pool() as pool:
             # Use imap_unordered to get results as they finish for the progress bar
-            results = pool.imap_unordered(run_single_game, [weights] * num_games)
+            results = pool.imap_unordered(run_single_game, [params] * num_games)
             
             for i, stats in enumerate(results):
                 if stats['result'] == 'win':
@@ -172,12 +172,13 @@ if __name__ == "__main__":
     parser.add_argument('--visual', '-v', action='store_true', help='Run in visual mode (curses)')
     parser.add_argument('--games', '-n', type=int, default=100, help='Number of games for batch simulation')
     parser.add_argument('--delay', '-d', type=float, default=0.2, help='Delay between steps in visual mode')
+    parser.add_argument('--debug', action='store_true', help='Enable debug mode (reveal all nodes)')
     
     args = parser.parse_args()
     
     if args.visual:
         try:
-            curses.wrapper(run_visual_game, weights=None, delay=args.delay)
+            curses.wrapper(run_visual_game, params=None, delay=args.delay, debug_mode=args.debug)
         except Exception as e:
             print(f"Error in visual mode: {e}")
     else:
