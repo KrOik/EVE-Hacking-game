@@ -312,6 +312,11 @@ class MapGenerator:
                 if d_core <= 1:
                     score -= 2000.0
 
+                # User Request: Avoid direct door blocking (start node neighbors)
+                # Hard constraint: Strictly forbid placing defense tokens at distance <= 1
+                if d_start <= 1:
+                    continue
+
                 neighbors = self.system.get_num_neighbors(node)
                 
                 # --- Type-Specific Scoring Heuristics ---
@@ -372,6 +377,9 @@ class MapGenerator:
                 scored_candidates.append((score, node))
             
             # Pick one of the top 3 candidates
+            if not scored_candidates:
+                return None
+
             scored_candidates.sort(key=lambda x: x[0], reverse=True)
             valid_candidates = [x for x in scored_candidates if x[0] > -500] # Filter out "too_close" ones
             if not valid_candidates:
@@ -413,7 +421,8 @@ class MapGenerator:
             d_start = dist_from_start.get(node, 999)
             ratio = d_start / max(total_dist_start_core, 1)
             # Zone: 10% to 50% of the way to core
-            if 0.10 <= ratio <= 0.50:
+            # Also ensure it's not blocking the start door (d_start > 1)
+            if 0.10 <= ratio <= 0.50 and d_start > 1:
                 outpost_candidates.append(node)
         
         # Sort by connectivity (high degree first)
