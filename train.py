@@ -15,11 +15,11 @@ from game.autopilot import AutoPilot
 from simulate import run_single_game as _run_single_game_sim
 
 # --- 遗传算法配置 ---
-POPULATION_SIZE = 12        # 种群大小：每一代同时保留的个体（策略）数量
-GENERATIONS = 10            # 进化总代数：算法循环优化多少次
-GAMES_PER_EVAL = 100        # 训练集地图数量：每代评估每个个体时使用的随机地图种子数（越多越准但越慢）
-VALIDATION_GAMES = 20       # 验证集地图数量：每代最佳个体额外在全新地图上做泛化测试的地图数，用于检测过拟合
-ELITISM_COUNT = 2           # 精英保留数：每代直接保留到下一代的最优个体数，防止优秀基因丢失
+POPULATION_SIZE = 24        # 种群大小：每一代同时保留的个体（策略）数量
+GENERATIONS = 25            # 进化总代数：算法循环优化多少次
+GAMES_PER_EVAL = 300        # 训练集地图数量：每代评估每个个体时使用的随机地图种子数（越多越准但越慢）
+VALIDATION_GAMES = 60       # 验证集地图数量：每代最佳个体额外在全新地图上做泛化测试的地图数，用于检测过拟合
+ELITISM_COUNT = 4           # 精英保留数：每代直接保留到下一代的最优个体数，防止优秀基因丢失
 # Define the parameter space to optimize
 PARAM_SPACE = {
     'DISTANCE_HINT': (0.0, 50.0),
